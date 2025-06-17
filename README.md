@@ -56,7 +56,7 @@ This application is built with Python and `tkinter`.
 
 3.  **Run the application:**
     ```bash
-    python not_asistani2.py
+    python note-harvester.py
     ```
 
 4.  **How to Use:**
