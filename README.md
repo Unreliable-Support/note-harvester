@@ -1,9 +1,7 @@
 # Note Harvester  
 <p align="center">
   <img src="https://raw.githubusercontent.com/user/repo/main/assets/note-harvester-demo.gif" alt="Note Harvester Demo">
-  <br>
-  <i>(Örnek: Buraya uygulamanın çalışma GIF'ini ekleyebilirsiniz)</i>
-</p>
+
 
 **Note Harvester** is a powerful desktop utility designed to streamline your information-gathering workflow. With a single global hotkey, you can instantly capture any selected text from any application and save it directly into a designated notebook. Stop the endless cycle of copy-pasting into messy text files and start harvesting information effortlessly.
 
