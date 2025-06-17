@@ -1,4 +1,4 @@
-# Note Harvester  নোট
+# Note Harvester  
 <p align="center">
   <img src="https://raw.githubusercontent.com/user/repo/main/assets/note-harvester-demo.gif" alt="Note Harvester Demo">
   <br>
