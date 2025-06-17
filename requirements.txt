@@ -1,0 +1,5 @@
+pynput
+pygetwindow
+Pillow
+pystray
+pyperclip
