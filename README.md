@@ -1,6 +1,14 @@
-# Note Harvester  
+# Note Harvester
 
 **Note Harvester** is a powerful desktop utility designed to streamline your information-gathering workflow. With a single global hotkey, you can instantly capture any selected text from any application and save it directly into a designated notebook. Stop the endless cycle of copy-pasting into messy text files and start harvesting information effortlessly.
+
+## 🚀 Quick Demo
+
+Watch a short demonstration to see Note Harvester in action!
+
+[![Note Harvester Demo Video](https://img.youtube.com/vi/z5KpwDU25sY/maxresdefault.jpg)](https://youtu.be/z5KpwDU25sY)
+
+---
 
 ## ✨ Features
 
@@ -60,6 +68,8 @@ This application is built with Python and `tkinter`.
     ```
 
 4.  **How to Use:**
+    For a visual guide, [watch the demo on YouTube](https://youtu.be/z5KpwDU25sY).
+
     - Create or select a notebook from the left panel. This will be your "active" notebook.
     - Go to any other application (browser, PDF reader, code editor).
     - Highlight some text.
