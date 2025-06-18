@@ -1,28 +1,31 @@
+
 # Note Harvester
 
-**Note Harvester** is a powerful desktop utility designed to streamline your information-gathering workflow. With a single global hotkey, you can instantly capture any selected text from any application and save it directly into a designated notebook. Stop the endless cycle of copy-pasting into messy text files and start harvesting information effortlessly.
+**Note Harvester** is a powerful yet lightweight desktop utility designed to streamline your information-gathering workflow. With a single, customizable global hotkey, you can instantly capture any selected text from any application and save it directly into an organized notebook, automatically tracking its source. Stop the endless cycle of copy-pasting into messy text files and never lose a piece of information again.
 
-## 🚀 Quick Demo
+[![Note Harvester Demo](https://img.youtube.com/vi/z5KpwDU25sY/maxresdefault.jpg)](https://youtu.be/z5KpwDU25sY)
+*(Click the image to watch the demo on YouTube)*
 
-Watch a short demonstration to see Note Harvester in action!
+## ✨ Core Features
 
-[![Note Harvester Demo Video](https://img.youtube.com/vi/z5KpwDU25sY/maxresdefault.jpg)](https://youtu.be/z5KpwDU25sY)
-
----
-
-## ✨ Features
-
-- **Global Hotkey Capture**: Press `<Ctrl>+<Alt>+A` (or your custom hotkey) anywhere in your OS to save the currently highlighted text.
-- **Notebook Organization**: Create, delete, and switch between multiple notebooks to keep your notes organized by topic or project.
-- **Robust GUI**:
-    - A clean, three-pane view for notebooks, note lists, and detailed note content.
-    - **Powerful Filtering**: Search notes by text, source application, and date range (Today, Last 7 Days, etc.).
-    - **Note Management**: Merge multiple notes into a single new note, or delete notes individually.
-    - **Context Menu**: Right-click on a note to quickly copy its content, source, or timestamp, or to delete it.
-- **System Tray Integration**: Minimize the app to the system tray to keep it running unobtrusively in the background.
-- **Customizable Hotkey**: Easily change the capture hotkey through the built-in settings window.
-- **Crash-Proof Capture**: The hotkey listener is designed to be highly stable, pausing itself during capture to prevent conflicts and ensuring it always restarts.
-- **Data Portability**: All notes are stored in human-readable `.json` files, and settings are in a simple `.ini` file, located in your user home folder.
+-   **Global Hotkey Capture**: Select text in any application and press a customizable hotkey (`<Ctrl>+<Alt>+A` by default) to instantly save it.
+-   **Automatic Source Tracking**: Automatically records the title of the window you captured from as the note's "source".
+-   **Notebook Organization**: Organize your notes into separate notebooks, which are stored as simple, portable JSON files.
+-   **Powerful Filtering & Search**:
+    -   Full-text search with case-sensitive and whole-word options.
+    -   Filter notes by their source application/document.
+    -   Filter notes by a specific date range.
+-   **Advanced Note Management**:
+    -   Merge multiple selected notes into a single new note.
+    -   **Merge by Source**: A powerful feature to combine all notes from a specific source (e.g., a single PDF or webpage) into one consolidated document.
+    -   Right-click context menu for quick actions like copying content or deleting.
+-   **Flexible Viewing**:
+    -   A "Single Page View" to read all notes in a notebook like a continuous document.
+    -   Zoom in and out (`Ctrl` + `Mouse Wheel`) for comfortable reading in both the detail pane and single-page view.
+    -   Toggleable note detail pane to maximize list visibility.
+-   **Export Your Data**:
+    -   Export your notebooks to clean, professional-looking **PDF** or **HTML** files using Pandoc.
+-   **System Tray Integration**: Minimize the application to your system tray to keep it running unobtrusively in the background.
 
 ## ⚙️ How It Works
 
@@ -36,52 +39,78 @@ Note Harvester runs a background thread that listens for a global hotkey combina
 
 This pause/resume cycle makes the capture process extremely reliable.
 
-## 🚀 Installation & Usage
+## 🚀 Installation
 
-This application is built with Python and `tkinter`.
+### Prerequisites
 
-1.  **Clone the repository:**
+1.  **Python 3.x**: Ensure you have Python installed.
+2.  **Pandoc (for Exporting)**: To use the PDF/HTML export feature, you must install Pandoc. You can find instructions at [pandoc.org/installing](https://pandoc.org/installing.html).
+3.  **LaTeX (for PDF Export)**: For PDF exporting, Pandoc requires a LaTeX distribution.
+    -   **Windows**: [MiKTeX](https://miktex.org/download)
+    -   **macOS**: [MacTeX](https://www.tug.org/mactex/)
+    -   **Linux**: TeX Live (`sudo apt-get install texlive-latex-base` on Debian/Ubuntu).
+
+### Setup Steps
+
+1.  **Download the Application**:
+    Download the `bn.py` file and the `requirements.txt` file from this repository.
+
+2.  **Install Required Python Packages**:
+    Open a terminal or command prompt in the folder where you saved the files and run the following command:
     ```bash
-    git clone https://github.com/your-username/note-harvester.git
-    cd note-harvester
-    ```
-
-2.  **Install dependencies:**
-    It's recommended to use a virtual environment.
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     pip install -r requirements.txt
     ```
-    *You will need to create a `requirements.txt` file with the following content:*
-    ```
-    pynput
-    pygetwindow
-    Pillow
-    pystray
-    pyperclip
-    ```
 
-3.  **Run the application:**
+3.  **Run the Application**:
+    Navigate to the directory where you saved `bn.py` and run it:
     ```bash
-    python note-harvester.py
+    python bn.py
     ```
 
-4.  **How to Use:**
-    For a visual guide, [watch the demo on YouTube](https://youtu.be/z5KpwDU25sY).
+## How to Use
 
-    - Create or select a notebook from the left panel. This will be your "active" notebook.
-    - Go to any other application (browser, PDF reader, code editor).
-    - Highlight some text.
-    - Press `<Ctrl>+<Alt>+A`.
-    - A status message will confirm the note has been saved. The note will appear in the main window.
+### First Launch
 
-## 📂 File Structure
+-   On the first run, the app will automatically create:
+    -   A `config.ini` file in the same directory to store your hotkey settings.
+    -   A `Note_Harvester_Data` folder in your user's home directory (`C:\Users\YourName` on Windows or `/home/yourname` on Linux) to store your notebooks.
 
-- **Notes Data**: Your notes are stored in `C:\Users\YourUser\Note_Harvester_Data\`. Each notebook is a separate `.json` file.
-- **Configuration**: The hotkey setting is saved in `config.ini` in the same directory as the script.
-- **Crash Log**: If the application crashes, details will be saved to `note_harvester_crash.log`.
+### Capturing Your First Note
+
+1.  **Create a Notebook**: Click the "New" button in the left-hand "Notebooks" panel and give your notebook a name (e.g., "Research"). The new notebook will be selected automatically.
+2.  **Select Text**: Go to any other application (a web browser, a PDF reader, a code editor) and highlight some text.
+3.  **Press the Hotkey**: Press **`<Ctrl> + <Alt> + A`**.
+4.  **Done!**: The selected text, along with the title of the source window, has been instantly saved to your active notebook. The main window will refresh to show your new note at the top of the list.
+
+### Navigating the Interface
+
+-   **Notebooks Panel (Left)**: Create, delete, and switch between your notebooks.
+-   **Filters (Top-Right)**: Search your notes, filter by source, and select a date range. The note list updates instantly as you type.
+-   **Notes List (Middle-Right)**: Shows a list of your notes from the active notebook, sorted by most recent first. You can right-click on notes here for a context menu with more options.
+-   **Detail View (Bottom-Right)**: Displays the full text of the selected note. Use the "Toggle Detail View" button to hide or show this panel.
+
+### Changing the Hotkey
+
+1.  Go to `Settings -> Change Hotkey...`.
+2.  Click the "Click to Change" button.
+3.  Press your desired new key combination.
+4.  Click "Save". The application will restart the hotkey listener with your new shortcut.
+
+## Dependencies
+
+-   [Pillow](https://python-pillow.org/)
+-   [pynput](https://github.com/moses-palmer/pynput)
+-   [pygetwindow](https://github.com/asweigart/pygetwindow)
+-   [pyperclip](https://github.com/asweigart/pyperclip)
+-   [pystray](https://github.com/moses-palmer/pystray)
+-   [tkcalendar](https://github.com/j4321/tkcalendar)
 
 ## 📄 License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+Markdown
+IGNORE_WHEN_COPYING_END
