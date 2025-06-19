@@ -53,7 +53,7 @@ This pause/resume cycle makes the capture process extremely reliable.
 ### Setup Steps
 
 1.  **Download the Application**:
-    Download the `bn.py` file and the `requirements.txt` file from this repository.
+    Download the `note-harvester.py` file and the `requirements.txt` file from this repository.
 
 2.  **Install Required Python Packages**:
     Open a terminal or command prompt in the folder where you saved the files and run the following command:
@@ -62,9 +62,9 @@ This pause/resume cycle makes the capture process extremely reliable.
     ```
 
 3.  **Run the Application**:
-    Navigate to the directory where you saved `bn.py` and run it:
+    Navigate to the directory where you saved `note-harvester.py` and run it:
     ```bash
-    python bn.py
+    python note-harvester.py
     ```
 
 ## How to Use
