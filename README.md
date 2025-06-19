@@ -78,7 +78,7 @@ If you prefer to run the application directly from the Python source code, follo
 
 1.  **Create a Notebook**: Click the "New" button in the left-hand "Notebooks" panel and give your notebook a name (e.g., "Research"). The new notebook will be selected automatically.
 2.  **Select Text**: Go to any other application (a web browser, a PDF reader, a code editor) and highlight some text.
-3.  **Press the Hotkey**: Press **`<Ctrl> + B`**.
+3.  **Press the Hotkey**: Press **`<Ctrl> +<Alt> + A`**.
 4.  **Done!**: The selected text, along with the title of the source window, has been instantly saved to your active notebook. The main window will refresh to show your new note at the top of the list.
 
 ### Navigating the Interface
