@@ -1,4 +1,3 @@
-# --- START OF FILE bn.py ---
 
 import os
 import json
@@ -20,7 +19,14 @@ import re
 import shutil
 import tempfile
 import subprocess
-
+import sys
+import time
+from datetime import datetime
+import pyperclip
+from pynput import keyboard
+import pygetwindow as gw
+from PIL import Image, ImageTk
+from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
 # Crash Logging Setup
 logging.basicConfig(
     level=logging.ERROR,
@@ -162,12 +168,41 @@ class SettingsWindow(tk.Toplevel):
             self.record_button.config(text="Click to Change")
 
     def get_key_name(self, event):
-        key = event.keysym.lower()
-        if key in ('control_l', 'control_r'): return '<ctrl>'
-        if key in ('alt_l', 'alt_r'): return '<alt>'
-        if key in ('shift_l', 'shift_r'): return '<shift>'
-        if len(key) == 1 and key.isalnum(): return key
-        return None
+        """
+        Converts a tkinter key event into a string format that pynput understands.
+        This version is more robust and handles a wider range of keys.
+        """
+        # Handle modifier keys first, using pynput's format
+        key_lower = event.keysym.lower()
+        if key_lower in ('control_l', 'control_r'):
+            return '<ctrl>'
+        if key_lower in ('alt_l', 'alt_r'):
+            return '<alt>'
+        if key_lower in ('shift_l', 'shift_r'):
+            return '<shift>'
+        if key_lower in ('cmd_l', 'cmd_r', 'win_l', 'win_r'):
+            return '<cmd>'
+
+        # --- START OF FIX ---
+        # For special keys (F-keys, arrows, etc.), pynput often uses the
+        # keysym name directly. We can check if it's a single character or not.
+        if len(event.keysym) > 1:
+            # It's a special key like 'F5', 'Insert', 'Home', 'Up'
+            # pynput usually just uses the lowercase name.
+            # We can wrap it in angle brackets for consistency, but it's often not needed.
+            # Let's return it as is, in lowercase.
+            # Example: 'f5', 'delete', 'page_down'
+            return key_lower
+
+        # For regular character keys (letters, numbers, symbols)
+        # We can use event.char which correctly handles symbols like '+' or '!'
+        # that event.keysym might not represent as a single character.
+        if event.char and event.char.isprintable():
+            return event.char
+        
+        # Fallback for any other case, though it should be rare
+        return key_lower
+        # --- END OF FIX ---
 
     def save_and_close(self):
         self.parent.update_hotkey(self.new_hotkey_str)
@@ -405,10 +440,33 @@ class NoteHarvesterApp(tk.Tk):
         regex = re.compile('|'.join(re.escape(key) for key in sorted(conv.keys(), key=len, reverse=True)))
         return regex.sub(lambda match: conv[match.group()], text)
 
+
     def setup_window(self):
         self.title("Note Harvester v2.5 (Final)")
         self.geometry("1100x700")
-        self.iconphoto(True, self.generate_tk_icon())
+
+        # --- BAŞLANGIÇ: PNG İKON YÜKLEMEK İÇİN YENİ VE GÜVENİLİR YÖNTEM ---
+        try:
+            # Önceki çözümdeki gibi, betiğin/exe'nin yolunu buluyoruz.
+            if getattr(sys, 'frozen', False):
+                base_path = sys._MEIPASS
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+
+            # Bu sefer .png dosyasını arıyoruz
+            icon_path = os.path.join(base_path, 'icon.png')
+            
+            # Pillow kullanarak PNG dosyasını açıp bir PhotoImage nesnesine dönüştürüyoruz
+            icon_image = tk.PhotoImage(file=icon_path)
+            
+            # iconphoto metodu ile ikonu ayarlıyoruz. 'True' parametresi,
+            # bunun varsayılan pencere ikonu olacağını belirtir.
+            self.iconphoto(True, icon_image)
+
+        except Exception as e:
+            # Herhangi bir hata durumunda program çökmesin
+            print(f"Could not set window icon: {e}")
+        # --- SON: PNG İKON YÜKLEMEK İÇİN YENİ VE GÜVENİLİR YÖNTEM ---
 
     def create_menu(self):
         menu_bar = tk.Menu(self)
@@ -527,7 +585,8 @@ class NoteHarvesterApp(tk.Tk):
             self.after(100, self.poll_queue)
 
     def execute_annotation_capture(self):
-        if self.is_capturing: return
+        if self.is_capturing:
+            return
         self.is_capturing = True
         self.hotkey_service.stop()
         try:
@@ -536,13 +595,33 @@ class NoteHarvesterApp(tk.Tk):
                 return
             source = gw.getActiveWindow().title if gw.getActiveWindow() else "Unknown Source"
             original_clipboard = pyperclip.paste()
-            pyperclip.copy('')
+            pyperclip.copy('')  # Panoyu temizle
+
+            # İşletim sistemine göre doğru modifier tuşunu seç
+            if sys.platform == 'darwin':
+                modifier = keyboard.Key.cmd  # macOS için Cmd
+            else:
+                modifier = keyboard.Key.ctrl  # Windows ve Linux için Ctrl
+
             controller = keyboard.Controller()
-            with controller.pressed(keyboard.Key.ctrl): controller.press('c'); controller.release('c')
-            time.sleep(0.1)
-            selected_text = pyperclip.paste()
-            pyperclip.copy(original_clipboard)
-            if selected_text and not selected_text.isspace():
+            with controller.pressed(modifier):
+                controller.press('c')
+                controller.release('c')
+
+            # Panonun güncellenmesini bekle
+            start_time = time.time()
+            selected_text = ''
+            while time.time() - start_time < 1:  # 1 saniye bekle
+                selected_text = pyperclip.paste()
+                if selected_text and not selected_text.isspace():
+                    break
+                time.sleep(0.05)  # 50ms aralıklarla kontrol et
+            else:
+                selected_text = ''
+
+            pyperclip.copy(original_clipboard)  # Orijinal panoyu geri yükle
+
+            if selected_text:
                 annotation = {"timestamp": datetime.now().isoformat(), "source": source, "text": selected_text}
                 self.note_manager.add_annotation(self.active_notebook, annotation)
                 self.flash_status(f"Note saved to '{self.active_notebook}'!")
@@ -557,7 +636,7 @@ class NoteHarvesterApp(tk.Tk):
         finally:
             self.hotkey_service.start()
             self.is_capturing = False
-
+  
     def restart_hotkey_service(self):
         if self.hotkey_service: self.hotkey_service.stop()
         hotkey_str = self.config_manager.get_setting('Settings', 'hotkey')
@@ -695,8 +774,29 @@ class NoteHarvesterApp(tk.Tk):
         self.restart_hotkey_service()
         messagebox.showinfo("Success", f"Hotkey updated to '{new_hotkey_str}'.")
 
+
     def create_tray_icon(self):
-        image = self.generate_tray_icon_image()
+        # --- BAŞLANGIÇ: TEPSİ İKONUNU DOSYADAN YÜKLEME ---
+        try:
+            # Pencere ikonu için kullandığımız güvenilir yol bulma mantığının aynısı
+            if getattr(sys, 'frozen', False):
+                base_path = sys._MEIPASS
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+
+            # .png dosyasının tam yolunu oluştur
+            icon_path = os.path.join(base_path, 'icon.png')
+            
+            # Pillow (PIL) kullanarak ikonu dosyadan aç
+            image = Image.open(icon_path)
+
+        except Exception as e:
+            # Eğer ikon dosyası bulunamazsa veya bir hata olursa, programın çökmesini engelle
+            # ve eski, programatik olarak oluşturulan ikonu kullan.
+            print(f"Could not load tray icon from file, generating default: {e}")
+            image = self.generate_tray_icon_image()
+        # --- SON: TEPSİ İKONUNU DOSYADAN YÜKLEME ---
+
         menu = TrayMenu(TrayMenuItem("Show", self.show_window, default=True), TrayMenuItem("Exit", self.quit_app))
         self.tray_icon = TrayIcon("NoteHarvester", image, "Note Harvester", menu)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
@@ -715,11 +815,6 @@ class NoteHarvesterApp(tk.Tk):
     def show_window(self):
         self.deiconify(); self.lift(); self.focus_force()
 
-    def generate_tk_icon(self):
-        image = Image.new('RGB', (32, 32), '#333333')
-        dc = ImageDraw.Draw(image)
-        dc.text((8, 4), "H", fill='#FFFFFF', font_size=24)
-        return ImageTk.PhotoImage(image)
 
     def generate_tray_icon_image(self):
         image = Image.new('RGB', (64, 64), '#333333')
