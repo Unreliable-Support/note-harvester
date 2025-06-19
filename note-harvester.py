@@ -27,7 +27,13 @@ from pynput import keyboard
 import pygetwindow as gw
 from PIL import Image, ImageTk
 from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
-# Crash Logging Setup
+# Dosyanın üst kısımlarına, importların yanına ekleyin
+try:
+    from PIL import Image, ImageDraw, ImageTk, ImageGrab
+except ImportError:
+    messagebox.showerror("Dependency Error", "Pillow library is not installed. Please install it using: pip install Pillow")
+    sys.exit(1)
+
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -59,45 +65,92 @@ class ConfigManager:
         self.config.set(section, key, value)
         with open(self.filename, 'w') as configfile: self.config.write(configfile)
 
+# NoteManager sınıfının tamamı (güncellenmiş hali)
+
 class NoteManager:
     def __init__(self, data_folder="Note_Harvester_Data"):
-        self.data_path = os.path.join(os.path.expanduser("~"), data_folder)
-        os.makedirs(self.data_path, exist_ok=True)
+        self.user_data_path = os.path.join(os.path.expanduser("~"), data_folder)
+        self.image_assets_path = os.path.join(self.user_data_path, "_assets") # Resimler için yeni klasör
+        os.makedirs(self.user_data_path, exist_ok=True)
+        os.makedirs(self.image_assets_path, exist_ok=True) # Bu klasörü de oluştur
 
     def get_notebooks(self):
         try:
-            files = [f.replace('.json', '') for f in os.listdir(self.data_path) if f.endswith('.json')]
+            files = [f.replace('.json', '') for f in os.listdir(self.user_data_path) if f.endswith('.json')]
             return sorted(files)
         except FileNotFoundError: return []
 
     def create_notebook(self, name):
-        filepath = os.path.join(self.data_path, f"{name}.json")
+        filepath = os.path.join(self.user_data_path, f"{name}.json")
         if not os.path.exists(filepath):
             with open(filepath, 'w', encoding='utf-8') as f: json.dump([], f)
             return True
         return False
 
     def delete_notebook(self, name):
-        filepath = os.path.join(self.data_path, f"{name}.json")
+        filepath = os.path.join(self.user_data_path, f"{name}.json")
         if os.path.exists(filepath):
+            # İsteğe bağlı: Defter silinince ilgili resimleri de silmek isterseniz burada ek mantık gerekir.
+            # Şimdilik basit tutuyoruz.
             os.remove(filepath)
             return True
         return False
+        
+    def rename_notebook(self, old_name, new_name):
+        """Renames a notebook file."""
+        if old_name == new_name:
+            return True, "Names are the same."
+
+        old_filepath = os.path.join(self.user_data_path, f"{old_name}.json")
+        new_filepath = os.path.join(self.user_data_path, f"{new_name}.json")
+
+        if not os.path.exists(old_filepath):
+            return False, f"Notebook '{old_name}' not found."
+        
+        if os.path.exists(new_filepath):
+            return False, f"A notebook named '{new_name}' already exists."
+        
+        try:
+            os.rename(old_filepath, new_filepath)
+            return True, "Notebook renamed successfully."
+        except OSError as e:
+            return False, f"Error renaming notebook: {e}"
 
     def load_notes(self, notebook_name):
-        filepath = os.path.join(self.data_path, f"{notebook_name}.json")
+        filepath = os.path.join(self.user_data_path, f"{notebook_name}.json")
         try:
             with open(filepath, 'r', encoding='utf-8') as f: return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError): return []
 
     def save_notes(self, notebook_name, notes_data):
-        filepath = os.path.join(self.data_path, f"{notebook_name}.json")
+        filepath = os.path.join(self.user_data_path, f"{notebook_name}.json")
         with open(filepath, 'w', encoding='utf-8') as f: json.dump(notes_data, f, ensure_ascii=False, indent=4)
 
     def add_annotation(self, notebook_name, annotation):
         notes = self.load_notes(notebook_name)
         notes.append(annotation)
         self.save_notes(notebook_name, notes)
+
+    # --- YENİ METOT ---
+    def save_image_from_clipboard(self, image):
+        """Saves a PIL image to the assets folder and returns its relative path."""
+        try:
+            # Benzersiz bir dosya adı oluştur
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"img_{timestamp}.png"
+            
+            # Tam kayıt yolu
+            full_path = os.path.join(self.image_assets_path, filename)
+            
+            # Resmi kaydet
+            image.save(full_path, "PNG")
+            
+            # JSON'da saklanacak göreli yolu döndür
+            relative_path = os.path.join("_assets", filename)
+            return relative_path
+        except Exception as e:
+            logging.error(f"Failed to save image from clipboard: {e}", exc_info=True)
+            return None
 
 class HotkeyService:
     def __init__(self, hotkey_str, callback):
@@ -316,6 +369,61 @@ class ExportFormatDialog(simpledialog.Dialog):
         self.result = format_choice
         super().ok()
 
+class EditNoteWindow(tk.Toplevel):
+    """A Toplevel window for editing a single note's content."""
+    def __init__(self, parent, original_note_text, save_callback):
+        super().__init__(parent)
+        self.parent = parent
+        self.save_callback = save_callback
+        
+        self.title("Edit Note")
+        self.geometry("600x400")
+        self.transient(parent)
+        self.grab_set()
+
+        # Main frame
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- BAŞLANGIÇ: DÜZEN YÖNETİCİSİ DÜZELTMESİ ---
+
+        # Button frame'i ÖNCE ve AŞAĞIYA paketle
+        button_frame = ttk.Frame(main_frame)
+        # side=tk.BOTTOM: Bu çerçeveyi ana çerçevenin en altına yerleştirir.
+        # fill=tk.X: Çerçevenin yatay olarak genişlemesini sağlar.
+        # pady: Düğmelerin üzerindeki boşluk için.
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        
+        # Text widget'ı içeren çerçeveyi SONRA ve KALAN ALANI DOLDURACAK ŞEKİLDE paketle
+        text_frame = ttk.Frame(main_frame)
+        # side=tk.TOP: Bu çerçeveyi üstte kalan alana yerleştirir.
+        # fill=tk.BOTH ve expand=True: Hem yatay hem de dikey olarak kalan tüm alanı doldurmasını sağlar.
+        text_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # --- SON: DÜZEN YÖNETİCİSİ DÜZELTMESİ ---
+        
+        self.text_widget = tk.Text(text_frame, wrap=tk.WORD, padx=5, pady=5, undo=True)
+        self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text_widget.insert("1.0", original_note_text)
+        
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text_widget.yview)
+        self.text_widget.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Düğmelerin paketlenme şekli aynı kalır, çünkü onlar kendi çerçeveleri içindedir.
+        # Sadece çerçevelerin ana pencere içindeki sırasını değiştirdik.
+        ttk.Button(button_frame, text="Save", command=self.on_save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT)
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.text_widget.focus_set()
+
+    def on_save(self):
+        """Pass the updated text to the callback and close the window."""
+        updated_text = self.text_widget.get("1.0", tk.END).strip()
+        self.save_callback(updated_text)
+        self.destroy()
+
 class NoteHarvesterApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -440,6 +548,85 @@ class NoteHarvesterApp(tk.Tk):
         regex = re.compile('|'.join(re.escape(key) for key in sorted(conv.keys(), key=len, reverse=True)))
         return regex.sub(lambda match: conv[match.group()], text)
 
+# NoteHarvesterApp sınıfına eklenecek YENİ metotlar
+
+    def _copy_detail_content(self):
+        """Copies the content of the selected note (text or image) to the clipboard."""
+        selection = self.notes_tree.focus()
+        if not selection:
+            self.flash_status("No note selected to copy.")
+            return
+
+        try:
+            note = self.all_notes_cache.get(self.active_notebook, [])[int(selection)]
+        except (IndexError, KeyError):
+            self.flash_status("Error: Could not retrieve note data.")
+            return
+
+        note_type = note.get("type", "text")
+
+        if note_type == "text":
+            pyperclip.copy(note.get("text", ""))
+            self.flash_status("Note text copied to clipboard!")
+        elif note_type == "image":
+            image_path = note.get("image_path")
+            if not image_path:
+                self.flash_status("Error: Image path is missing.")
+                return
+
+            full_path = os.path.join(self.note_manager.user_data_path, image_path)
+            if not os.path.exists(full_path):
+                self.flash_status("Error: Image file not found.")
+                return
+
+            if self._copy_image_to_clipboard(full_path):
+                self.flash_status("Image copied to clipboard!")
+            else:
+                # Yedek mekanizma: dosya yolunu kopyala
+                pyperclip.copy(full_path)
+                self.flash_status("Image copied to clipboard (as file path).")
+                messagebox.showinfo(
+                    "Image Path Copied",
+                    "Could not copy the image data directly to the clipboard on this system (requires 'pywin32' on Windows).\n\nThe full path to the image file has been copied instead.",
+                    parent=self
+                )
+
+    def _copy_image_to_clipboard(self, image_path):
+        """
+        Attempts to copy an image file to the clipboard.
+        Currently supports Windows only (requires pywin32).
+        Returns True on success, False on failure.
+        """
+        if sys.platform == "win32":
+            try:
+                from io import BytesIO
+                import win32clipboard
+                import win32con
+
+                image = Image.open(image_path)
+                # RGBA formatını DIB (Device Independent Bitmap) formatının anlayacağı RGB'ye çevir
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                
+                output = BytesIO()
+                image.save(output, "BMP")
+                data = output.getvalue()[14:] # BMP başlığını atla
+                output.close()
+
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32con.CF_DIB, data)
+                win32clipboard.CloseClipboard()
+                return True
+            except ImportError:
+                print("pywin32 is not installed. Cannot copy image data to clipboard on Windows.")
+                return False
+            except Exception as e:
+                print(f"Failed to copy image to clipboard: {e}")
+                return False
+        else:
+            # Diğer işletim sistemleri için (macOS, Linux) henüz desteklenmiyor.
+            return False
 
     def setup_window(self):
         self.title("Note Harvester v2.5 (Final)")
@@ -488,6 +675,128 @@ class NoteHarvesterApp(tk.Tk):
         menu_bar.add_cascade(label="Settings", menu=settings_menu)
         settings_menu.add_command(label="Change Hotkey...", command=self.open_settings)
 
+# NoteHarvesterApp sınıfına eklenecek YENİ metotlar
+
+    def _show_notebook_context_menu(self, event):
+        """Displays a context menu for the notebook list."""
+        selection = self.notebook_listbox.curselection()
+        if not selection:
+            # Sağ tıklanan öğeyi seçili hale getir
+            clicked_index = self.notebook_listbox.nearest(event.y)
+            self.notebook_listbox.selection_clear(0, tk.END)
+            self.notebook_listbox.selection_set(clicked_index)
+            selection = self.notebook_listbox.curselection()
+
+        if selection:
+            context_menu = tk.Menu(self, tearoff=0)
+            context_menu.add_command(label="Rename...", command=self._rename_selected_notebook)
+            context_menu.add_command(label="Delete", command=self.delete_selected_notebook)
+            context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _rename_selected_notebook(self):
+        """Handles the logic for renaming a notebook."""
+        selection = self.notebook_listbox.curselection()
+        if not selection: return
+
+        old_name = self.notebook_listbox.get(selection[0])
+        new_name = simpledialog.askstring("Rename Notebook", 
+                                          f"Enter new name for '{old_name}':",
+                                          initialvalue=old_name,
+                                          parent=self)
+
+        if new_name and new_name.strip() and new_name.strip() != old_name:
+            new_name = new_name.strip()
+            success, message = self.note_manager.rename_notebook(old_name, new_name)
+            if success:
+                # Önbelleği temizle
+                if old_name in self.all_notes_cache:
+                    del self.all_notes_cache[old_name]
+                
+                # Listeyi yenile ve yeni adı seç
+                self.populate_notebook_list(select_first=False)
+                for i, item in enumerate(self.notebook_listbox.get(0, tk.END)):
+                    if item == new_name:
+                        self.notebook_listbox.selection_set(i)
+                        self.on_notebook_select()
+                        break
+                self.flash_status(f"Notebook '{old_name}' renamed to '{new_name}'.")
+            else:
+                messagebox.showerror("Error", message, parent=self)
+
+    def _rename_note_source(self):
+        """Renames the source for all selected notes."""
+        selection = self.notes_tree.selection()
+        if not selection: return
+
+        all_notes_in_view = self.all_notes_cache.get(self.active_notebook, [])
+        first_selected_note = all_notes_in_view[int(selection[0])]
+        current_source = first_selected_note.get('source', 'Unknown')
+
+        new_source = simpledialog.askstring("Rename Source",
+                                            "Enter new source name for selected note(s):",
+                                            initialvalue=current_source,
+                                            parent=self)
+
+        if not new_source or not new_source.strip():
+            return
+
+        new_source = new_source.strip()
+        full_note_list = self.note_manager.load_notes(self.active_notebook)
+        
+        # Seçilen notların benzersiz kimliklerini (timestamp) al
+        timestamps_to_update = {all_notes_in_view[int(i)]['timestamp'] for i in selection}
+
+        # Tam listede bu notları bul ve kaynağını güncelle
+        for note in full_note_list:
+            if note.get('timestamp') in timestamps_to_update:
+                note['source'] = new_source
+
+        self.note_manager.save_notes(self.active_notebook, full_note_list)
+        
+        # Kaynak filtresini ve not listesini güncelle
+        self._update_source_filter()
+        self.populate_notes_treeview()
+        self.flash_status(f"{len(selection)} note(s) source updated to '{new_source}'.")
+
+    def _edit_selected_note(self):
+        """Opens the EditNoteWindow for the selected note."""
+        selection = self.notes_tree.selection()
+        if not selection or len(selection) > 1: return
+
+        item_id = selection[0]
+        note_data = self.all_notes_cache.get(self.active_notebook, [])[int(item_id)]
+        original_timestamp = note_data['timestamp']
+        original_text = note_data['text']
+
+        # Geri arama fonksiyonu (callback) oluştur
+        save_callback = lambda new_text: self._save_edited_note(original_timestamp, new_text)
+        
+        # Düzenleme penceresini aç
+        EditNoteWindow(self, original_text, save_callback)
+
+    def _save_edited_note(self, original_timestamp, new_text):
+        """Saves the changes made in the EditNoteWindow."""
+        full_note_list = self.note_manager.load_notes(self.active_notebook)
+        
+        note_found = False
+        for note in full_note_list:
+            if note.get('timestamp') == original_timestamp:
+                note['text'] = new_text
+                note_found = True
+                break
+        
+        if note_found:
+            self.note_manager.save_notes(self.active_notebook, full_note_list)
+            # Görünümü yenile
+            self.populate_notes_treeview()
+            # Detay görünümünü de güncelle
+            self.on_note_select() 
+            self.flash_status("Note updated successfully.")
+        else:
+            messagebox.showerror("Error", "Could not find the original note to save changes.", parent=self)
+
+# NoteHarvesterApp sınıfı içindeki create_widgets metodunun tamamı
+
     def create_widgets(self):
         main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -498,6 +807,7 @@ class NoteHarvesterApp(tk.Tk):
         self.notebook_listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
         self.notebook_listbox.bind("<<ListboxSelect>>", self.on_notebook_select)
         self.notebook_listbox.bind("<Delete>", lambda e: self.delete_selected_notebook())
+        self.notebook_listbox.bind("<Button-3>", self._show_notebook_context_menu)
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X)
         ttk.Button(btn_frame, text="New", command=self.create_new_notebook).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,2))
@@ -542,21 +852,37 @@ class NoteHarvesterApp(tk.Tk):
         self.notes_tree.configure(xscrollcommand=h_scrollbar.set)
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.notes_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
         self.detail_frame = ttk.Frame(self.right_pane)
         self.right_pane.add(self.detail_frame, weight=2)
-        ttk.Label(self.detail_frame, text="Selected Note Detail", font=("Segoe UI", 12, "bold")).pack(pady=5, anchor="w", padx=5)
+        
+        # --- BAŞLANGIÇ: DÜĞMEYİ BAŞLIĞIN YANINA YERLEŞTİREN DÜZENLEME ---
+        detail_header_frame = ttk.Frame(self.detail_frame)
+        detail_header_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+        
+        # Başlığı sola yasla
+        ttk.Label(detail_header_frame, text="Selected Note Detail", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
+        
+        # Düğmeyi de sola yasla, böylece başlığın hemen yanına gelir.
+        # padx ile aralarına biraz boşluk ekle.
+        self.detail_copy_btn = ttk.Button(detail_header_frame, text="Copy", command=self._copy_detail_content)
+        self.detail_copy_btn.pack(side=tk.LEFT, padx=10)
+        # --- SON: DÜĞMEYİ BAŞLIĞIN YANINA YERLEŞTİREN DÜZENLEME ---
+
         self.note_detail_text = tk.Text(self.detail_frame, wrap=tk.WORD, padx=5, pady=5)
         self.detail_font = font.Font(family="Segoe UI", size=10)
         self.note_detail_text.configure(font=self.detail_font)
         self.note_detail_text.config(state="disabled")
         self._create_zoom_bindings(self.note_detail_text, self.detail_font)
-        self.note_detail_text.pack(fill=tk.BOTH, expand=True, padx=5)
+        self.note_detail_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5,0))
+        
         bottom_frame = ttk.Frame(self)
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_bar = ttk.Label(bottom_frame, text="Ready", relief=tk.SUNKEN, anchor=tk.W, padding=5)
         self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(bottom_frame, text="Merge Selected", command=self.merge_selected_notes).pack(side=tk.RIGHT, padx=(0,5), pady=5)
         ttk.Button(bottom_frame, text="Toggle Detail View", command=self.toggle_detail_view).pack(side=tk.RIGHT, padx=5, pady=5)
+        
         self.after(20, lambda: self.right_pane.sashpos(0, 400))
         
         self.bind("<p>", self.on_p_key)
@@ -584,59 +910,81 @@ class NoteHarvesterApp(tk.Tk):
         finally:
             self.after(100, self.poll_queue)
 
+# execute_annotation_capture metodunun tamamı (güncellenmiş hali)
     def execute_annotation_capture(self):
         if self.is_capturing:
             return
         self.is_capturing = True
         self.hotkey_service.stop()
+        
         try:
             if not self.active_notebook:
                 self.flash_status("Error: Please select a notebook in the UI.")
                 return
+
             source = gw.getActiveWindow().title if gw.getActiveWindow() else "Unknown Source"
-            original_clipboard = pyperclip.paste()
-            pyperclip.copy('')  # Panoyu temizle
+            
+            # 1. Panoda resim var mı diye kontrol et
+            clipboard_image = ImageGrab.grabclipboard()
 
-            # İşletim sistemine göre doğru modifier tuşunu seç
-            if sys.platform == 'darwin':
-                modifier = keyboard.Key.cmd  # macOS için Cmd
+            if isinstance(clipboard_image, Image.Image):
+                # Resim bulundu!
+                relative_path = self.note_manager.save_image_from_clipboard(clipboard_image)
+                if relative_path:
+                    annotation = {
+                        "timestamp": datetime.now().isoformat(),
+                        "source": source,
+                        "type": "image",
+                        "image_path": relative_path,
+                        "text": "" # Resimler için metin alanı şimdilik boş
+                    }
+                    self.note_manager.add_annotation(self.active_notebook, annotation)
+                    self.flash_status(f"Image saved to '{self.active_notebook}'!")
+                else:
+                    self.flash_status("Capture failed: Could not save image.")
             else:
-                modifier = keyboard.Key.ctrl  # Windows ve Linux için Ctrl
+                # 2. Resim yoksa, metin yakalamaya devam et
+                original_clipboard = pyperclip.paste()
+                pyperclip.copy('')
 
-            controller = keyboard.Controller()
-            with controller.pressed(modifier):
-                controller.press('c')
-                controller.release('c')
+                if sys.platform == 'darwin':
+                    modifier = keyboard.Key.cmd
+                else:
+                    modifier = keyboard.Key.ctrl
 
-            # Panonun güncellenmesini bekle
-            start_time = time.time()
-            selected_text = ''
-            while time.time() - start_time < 1:  # 1 saniye bekle
+                controller = keyboard.Controller()
+                with controller.pressed(modifier):
+                    controller.press('c')
+                    controller.release('c')
+
+                time.sleep(0.1) # Panonun güncellenmesi için kısa bir bekleme
                 selected_text = pyperclip.paste()
+                pyperclip.copy(original_clipboard)
+
                 if selected_text and not selected_text.isspace():
-                    break
-                time.sleep(0.05)  # 50ms aralıklarla kontrol et
-            else:
-                selected_text = ''
+                    annotation = {
+                        "timestamp": datetime.now().isoformat(),
+                        "source": source,
+                        "type": "text", # Tipini belirt
+                        "text": selected_text
+                    }
+                    self.note_manager.add_annotation(self.active_notebook, annotation)
+                    self.flash_status(f"Note saved to '{self.active_notebook}'!")
+                else:
+                    self.flash_status("Capture failed: No text or image selected.")
 
-            pyperclip.copy(original_clipboard)  # Orijinal panoyu geri yükle
+            # Her iki durumda da arayüzü güncelle
+            if self.state() == 'normal':
+                self._update_source_filter()
+                self.populate_notes_treeview()
 
-            if selected_text:
-                annotation = {"timestamp": datetime.now().isoformat(), "source": source, "text": selected_text}
-                self.note_manager.add_annotation(self.active_notebook, annotation)
-                self.flash_status(f"Note saved to '{self.active_notebook}'!")
-                if self.state() == 'normal':
-                    self._update_source_filter()
-                    self.populate_notes_treeview()
-            else:
-                self.flash_status("Capture failed: No text selected.")
         except Exception as e:
             logging.error(f"Error during annotation execution: {e}", exc_info=True)
             self.flash_status("An error occurred during capture.")
         finally:
             self.hotkey_service.start()
             self.is_capturing = False
-  
+ 
     def restart_hotkey_service(self):
         if self.hotkey_service: self.hotkey_service.stop()
         hotkey_str = self.config_manager.get_setting('Settings', 'hotkey')
@@ -644,11 +992,18 @@ class NoteHarvesterApp(tk.Tk):
         self.hotkey_service = HotkeyService(hotkey_str, callback)
         self.hotkey_service.start()
 
+# populate_notes_treeview metodunun tamamı (güncellenmiş hali)
     def populate_notes_treeview(self):
         if not self.active_notebook: return
         for i in self.notes_tree.get_children(): self.notes_tree.delete(i)
         self.note_detail_text.config(state="normal"); self.note_detail_text.delete("1.0", tk.END); self.note_detail_text.config(state="disabled")
+        
+        # self.note_detail_text içindeki eski resimleri temizle
+        if hasattr(self, '_detail_view_images'):
+            self._detail_view_images.clear()
+            
         notes = self.note_manager.load_notes(self.active_notebook)
+        # ... filtreleme mantığı aynı kalıyor ...
         filter_text = self.search_var.get()
         filter_source = self.source_filter_var.get()
         if filter_text:
@@ -664,22 +1019,32 @@ class NoteHarvesterApp(tk.Tk):
             start, end = self.custom_date_filter
             end_of_day = end + timedelta(days=1)
             notes = [n for n in notes if start <= datetime.fromisoformat(n.get('timestamp')).date() < end_of_day]
+        
         notes.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         self.all_notes_cache[self.active_notebook] = notes
         style = ttk.Style()
         style.configure("Treeview", rowheight=20)
+        
         for i, note in enumerate(notes):
-            text = note.get("text", "")
             source = note.get("source", "Unknown")
             try: timestamp = datetime.fromisoformat(note.get("timestamp", "")).strftime('%Y-%m-%d %H:%M:%S')
             except: timestamp = "Invalid Date"
-            summary = (text[:75] + '...' if len(text) > 75 else text)
+            
+            # Not tipine göre özet oluştur
+            note_type = note.get("type", "text")
+            if note_type == "image":
+                summary = "[Image Note]"
+            else:
+                text = note.get("text", "")
+                summary = (text[:75] + '...' if len(text) > 75 else text)
+            
             self.notes_tree.insert("", tk.END, iid=i, values=(timestamp, source, summary.replace("\n", " ")))
 
     def _handle_drag_select(self, event):
         item = self.notes_tree.identify_row(event.y)
         if item: self.notes_tree.selection_add(item)
 
+# _show_context_menu metodunun tamamı (güncellenmiş hali)
     def _show_context_menu(self, event):
         selection = self.notes_tree.selection()
         if not selection:
@@ -690,7 +1055,10 @@ class NoteHarvesterApp(tk.Tk):
             
         context_menu = tk.Menu(self, tearoff=0)
         
+        # --- YENİ VE GÜNCELLENMİŞ BÖLÜM BAŞLANGICI ---
         if len(selection) == 1:
+            context_menu.add_command(label="Edit Note...", command=self._edit_selected_note)
+            context_menu.add_separator()
             context_menu.add_command(label="Copy Full Text", command=lambda: self._copy_from_context('text'))
             context_menu.add_command(label="Copy Source", command=lambda: self._copy_from_context('source'))
             context_menu.add_command(label="Copy Timestamp", command=lambda: self._copy_from_context('timestamp'))
@@ -698,15 +1066,16 @@ class NoteHarvesterApp(tk.Tk):
             context_menu.add_command(label=f"Copy {len(selection)} Full Texts", command=lambda: self._copy_from_context('text', multi=True))
         
         context_menu.add_separator()
+
+        if selection: # Herhangi bir not seçiliyse bu seçenekler görünsün
+             context_menu.add_command(label="Rename Source...", command=self._rename_note_source)
         
         if len(selection) > 1:
             context_menu.add_command(label="Merge Selected", command=self.merge_selected_notes)
         
-        # --- START OF CHANGE ---
-        # Add the new "Merge by Source" option. It's available even if only one note is selected.
         if selection:
             context_menu.add_command(label="Merge All by Source", command=self.merge_notes_by_source)
-        # --- END OF CHANGE ---
+        # --- YENİ VE GÜNCELLENMİŞ BÖLÜM SONU ---
             
         context_menu.add_command(label="Delete Selected", command=self.delete_selected_notes_from_context)
         context_menu.tk_popup(event.x_root, event.y_root)
@@ -752,14 +1121,55 @@ class NoteHarvesterApp(tk.Tk):
         self._update_source_filter()
         self._apply_filters()
 
+# on_note_select metodunun tamamı (güncellenmiş hali)
     def on_note_select(self, event=None):
         if not self.detail_view_visible: return
         item_id = self.notes_tree.focus()
         if not item_id: return
+        
         note = self.all_notes_cache.get(self.active_notebook, [])[int(item_id)]
+        
         self.note_detail_text.config(state="normal")
         self.note_detail_text.delete("1.0", tk.END)
-        self.note_detail_text.insert("1.0", note.get("text", ""))
+        
+        note_type = note.get("type", "text")
+
+        if note_type == "image" and "image_path" in note:
+            # Resim notunu göster
+            try:
+                # Tam dosya yolunu oluştur
+                full_image_path = os.path.join(self.note_manager.user_data_path, note['image_path'])
+                
+                if os.path.exists(full_image_path):
+                    # Resmi yeniden boyutlandırarak göster
+                    img = Image.open(full_image_path)
+                    
+                    # Pencere genişliğine sığdır
+                    max_width = self.note_detail_text.winfo_width() - 20 # Kenar boşlukları için pay
+                    if max_width < 50: max_width = 400 # Başlangıçta genişlik 0 olabilir, varsayılan bir değer kullan
+                    
+                    if img.width > max_width:
+                        ratio = max_width / img.width
+                        new_height = int(img.height * ratio)
+                        img = img.resize((max_width, new_height), Image.LANCZOS)
+
+                    # Tkinter'in anlayacağı formata çevir
+                    # Referansını saklamalıyız yoksa garbage collector siler!
+                    if not hasattr(self, '_detail_view_images'):
+                        self._detail_view_images = []
+                    
+                    photo = ImageTk.PhotoImage(img)
+                    self._detail_view_images.append(photo) # Referansı sakla
+                    
+                    self.note_detail_text.image_create(tk.END, image=photo)
+                else:
+                    self.note_detail_text.insert("1.0", f"[Image not found at: {note['image_path']}]")
+            except Exception as e:
+                self.note_detail_text.insert("1.0", f"[Error loading image: {e}]")
+        else:
+            # Metin notunu göster
+            self.note_detail_text.insert("1.0", note.get("text", ""))
+
         self.note_detail_text.config(state="disabled")
 
     def flash_status(self, message, duration=3000):
@@ -903,12 +1313,37 @@ class NoteHarvesterApp(tk.Tk):
             
         self.flash_status("Notes merged successfully!")
 
+# delete_selected_notes_from_context metodunun tamamı (güncellenmiş hali)
     def delete_selected_notes_from_context(self):
-        if not self.notes_tree.selection(): messagebox.showinfo("Information", "No notes selected to delete.", parent=self); return
-        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to delete {len(self.notes_tree.selection())} note(s)?", parent=self):
-            all_notes = self.all_notes_cache.get(self.active_notebook, [])
-            indices_to_delete = {int(i) for i in self.notes_tree.selection()}
-            remaining_notes = [note for i, note in enumerate(all_notes) if i not in indices_to_delete]
+        selection = self.notes_tree.selection()
+        if not selection: 
+            messagebox.showinfo("Information", "No notes selected to delete.", parent=self)
+            return
+            
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to delete {len(selection)} note(s)?", parent=self):
+            all_notes_from_file = self.note_manager.load_notes(self.active_notebook)
+            
+            # Mevcut görünümdeki (filtrelenmiş) notlar
+            notes_in_view = self.all_notes_cache.get(self.active_notebook, [])
+            
+            # Silinecek notların benzersiz kimliklerini (timestamp) topla
+            timestamps_to_delete = set()
+            for item_id in selection:
+                note_to_delete = notes_in_view[int(item_id)]
+                timestamps_to_delete.add(note_to_delete.get('timestamp'))
+                
+                # Eğer bu bir resim notuysa, dosyasını sil
+                if note_to_delete.get('type') == 'image' and 'image_path' in note_to_delete:
+                    try:
+                        image_path = os.path.join(self.note_manager.user_data_path, note_to_delete['image_path'])
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                    except Exception as e:
+                        print(f"Could not delete image file {image_path}: {e}")
+
+            # Tam listeden bu notları çıkar
+            remaining_notes = [note for note in all_notes_from_file if note.get('timestamp') not in timestamps_to_delete]
+            
             self.note_manager.save_notes(self.active_notebook, remaining_notes)
             self.populate_notes_treeview()
             self.flash_status("Note(s) deleted.")
@@ -939,12 +1374,9 @@ class NoteHarvesterApp(tk.Tk):
         self.source_filter_combo['values'] = ["All Sources"] + sources
         self.source_filter_var.set("All Sources")
 
-    def generate_markdown(self, notes):
-        # --- START OF FIX ---
-        # \makefullwidthline komutunu tanımlıyoruz. Bu komut, sayfanın tam
-        # genişliğinde bir çizgi çeker. \noindent ile girintiyi kaldırır,
-        # \rule ile çizginin genişliğini ve kalınlığını belirleriz.
-        # \linewidth, metin bloğunun genişliğidir.
+# generate_markdown metodunun tamamı (güncellenmiş hali)
+    def generate_markdown(self, notes, notebook_name, filter_description=""):
+        # ... (metodun başındaki YAML header kısmı aynı kalıyor) ...
         yaml_header = """---
 geometry: "a4paper, margin=2.5cm"
 header-includes:
@@ -955,27 +1387,61 @@ header-includes:
   - \\newcommand{\\fullwidthline}{\\noindent\\rule{\\linewidth}{0.4pt}}
 ---
 """
-        # --- END OF FIX ---
-
         md_lines = [yaml_header]
-        for note in notes:
+        md_lines.append(f"# {self._escape_latex(notebook_name)}\n")
+        if filter_description:
+            md_lines.append(f"*{self._escape_latex(f'Filters: {filter_description}')}*\n")
+        md_lines.append("\\vspace{1em}\n")
+
+        for i, note in enumerate(notes):
+            if i > 0:
+                md_lines.append("\\fullwidthline\n")
+
             timestamp = note.get("timestamp", "Unknown")
             try:
                 timestamp = datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            except:
-                pass
+            except: pass
             
             source = self._escape_latex(note.get("source", "Unknown"))
-            text = self._escape_latex(note.get("text", ""))
+            
+            md_lines.append(f"### {timestamp} | {source}\n")
 
-            # --- START OF FIX ---
-            # Standart '---' yerine, tanımladığımız özel LaTeX komutunu kullanıyoruz.
-            # İki satır boşluk bırakarak okunabilirliği artırıyoruz.
-            md_lines.append(f"### {timestamp} | {source}\n\n{text}\n\n\\fullwidthline\n")
-            # --- END OF FIX ---
+            # Not tipine göre içeriği ekle
+            if note.get("type") == "image" and "image_path" in note:
+                # Markdown resim sözdizimi: ![alt text](path)
+                # Pandoc, geçici dizindeki göreli yolları anlar
+                image_filename = os.path.basename(note['image_path'])
+                md_lines.append(f"![{image_filename}]({image_filename})\n")
+            else:
+                text = self._escape_latex(note.get("text", ""))
+                md_lines.append(f"\n{text}\n")
             
         return "\n".join(md_lines)
 
+    def _get_active_filters_description(self) -> str:
+        """Generates a human-readable string describing active filters."""
+        filters = []
+        # Search Text Filter
+        search_text = self.search_var.get()
+        if search_text:
+            filters.append(f"Text containing '{search_text}'")
+
+        # Source Filter
+        source_filter = self.source_filter_var.get()
+        if source_filter and source_filter != "All Sources":
+            filters.append(f"Source is '{source_filter}'")
+
+        # Date Filter
+        if self.custom_date_filter:
+            start, end = self.custom_date_filter
+            filters.append(f"Date between {start.strftime('%Y-%m-%d')} and {end.strftime('%Y-%m-%d')}")
+        
+        if not filters:
+            return ""
+        
+        return ", ".join(filters)
+
+# export_to_pandoc metodunun tamamı (güncellenmiş hali)
     def export_to_pandoc(self):
         if not self.active_notebook:
             messagebox.showinfo("Information", "Please select a notebook first.", parent=self)
@@ -994,13 +1460,14 @@ header-includes:
         if not format_choice:
             return
         
-        md_content = self.generate_markdown(notes)
+        notebook_name = self.active_notebook
+        filter_desc = self._get_active_filters_description()
+        md_content = self.generate_markdown(notes, notebook_name, filter_desc)
         
         with tempfile.TemporaryDirectory() as tmpdir:
+            from tkinter import filedialog
             safe_notebook_name = re.sub(r'[\\/*?:"<>|]', "", self.active_notebook)
             base_filename = f"{safe_notebook_name}_{datetime.now().strftime('%Y%m%d')}"
-            
-            from tkinter import filedialog
             output_path = filedialog.asksaveasfilename(
                 initialdir=os.path.expanduser("~"),
                 initialfile=f"{base_filename}.{format_choice}",
@@ -1011,32 +1478,41 @@ header-includes:
             if not output_path:
                 return
 
+            # --- YENİ BÖLÜM: Resimleri geçici dizine kopyala ---
+            for note in notes:
+                if note.get("type") == "image" and "image_path" in note:
+                    src_path = os.path.join(self.note_manager.user_data_path, note['image_path'])
+                    dest_path = os.path.join(tmpdir, os.path.basename(note['image_path']))
+                    if os.path.exists(src_path):
+                        shutil.copy(src_path, dest_path)
+            # --- YENİ BÖLÜM SONU ---
+
             md_path = os.path.join(tmpdir, "export.md")
             with open(md_path, 'w', encoding='utf-8') as tmp_md:
                 tmp_md.write(md_content)
 
             try:
-                command = ['pandoc', md_path, '-o', output_path]
+                # Pandoc'u geçici dizinden çalıştırarak göreli yolları bulmasını sağla
+                command = ['pandoc', os.path.basename(md_path), '-o', output_path]
                 if format_choice == 'pdf':
                     command.extend(['--pdf-engine=pdflatex'])
                 
-                subprocess.run(command, check=True)
+                # CWD (Current Working Directory) parametresi önemli
+                subprocess.run(command, check=True, cwd=tmpdir)
                 
                 messagebox.showinfo("Success", f"Successfully exported to:\n{output_path}", parent=self)
                 
                 if os.name == 'nt':
-                    os.startfile(output_path)
+                    os.startfile(os.path.abspath(output_path))
                 else:
-                    subprocess.run(['xdg-open', output_path])
+                    subprocess.run(['xdg-open', os.path.abspath(output_path)])
 
             except subprocess.CalledProcessError as e:
                 error_message = f"Pandoc conversion failed: {e}"
-                if "pdflatex not found" in str(e):
-                    error_message += "\n\nIt seems a LaTeX distribution (like MiKTeX or TeX Live) is not installed. It's required for PDF export."
+                # ... (hata mesajları aynı kalıyor) ...
                 messagebox.showerror("Error", error_message, parent=self)
             except Exception as e:
                 messagebox.showerror("Error", f"An unexpected error occurred during export: {e}", parent=self)
-
 
 if __name__ == "__main__":
     try:
